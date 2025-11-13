@@ -151,6 +151,10 @@
 			</div>
 		{/if}
 		
+		<div class="info-message">
+			<p>This was put together without writing any code. If you want to know more there's a young mens group that meets every Wednesday!</p>
+		</div>
+		
 		<a href="/" class="back-link">← Back to Survey</a>
 	</div>
 </div>
@@ -267,6 +271,22 @@
 	.vote-count {
 		color: #667eea;
 		font-weight: 600;
+	}
+	
+	.info-message {
+		margin-top: 3rem;
+		padding: 1.5rem;
+		background: #f0f9ff;
+		border-left: 4px solid #667eea;
+		border-radius: 8px;
+		text-align: center;
+	}
+	
+	.info-message p {
+		margin: 0;
+		color: #1e40af;
+		font-size: 1rem;
+		line-height: 1.6;
 	}
 	
 	.back-link {

@@ -58,6 +58,20 @@ else
     echo "POST method for /api/vote already exists"
 fi
 
+# Create OPTIONS method for /api/vote (for CORS preflight)
+if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $VOTE_RESOURCE_ID --http-method OPTIONS --region $REGION 2>/dev/null; then
+    echo "Creating OPTIONS method for /api/vote..."
+    aws apigateway put-method --rest-api-id $API_ID --resource-id $VOTE_RESOURCE_ID --http-method OPTIONS --authorization-type NONE --region $REGION
+    
+    aws apigateway put-integration --rest-api-id $API_ID --resource-id $VOTE_RESOURCE_ID --http-method OPTIONS --type AWS_PROXY --integration-http-method POST --uri "arn:aws:apigateway:$REGION:lambda:path/2015-03-31/functions/$VOTE_FUNCTION_ARN/invocations" --region $REGION
+    
+    # Grant API Gateway permission to invoke Lambda for OPTIONS
+    aws lambda add-permission --function-name vote --statement-id apigateway-invoke-vote-options-$(date +%s) --action lambda:InvokeFunction --principal apigateway.amazonaws.com --source-arn "arn:aws:execute-api:$REGION:*:$API_ID/*/OPTIONS/api/vote" --region $REGION 2>/dev/null || true
+    echo "OPTIONS /api/vote configured"
+else
+    echo "OPTIONS method for /api/vote already exists"
+fi
+
 # Create GET method for /api/results
 if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $RESULTS_RESOURCE_ID --http-method GET --region $REGION 2>/dev/null; then
     echo "Creating GET method for /api/results..."
@@ -70,6 +84,20 @@ if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $RESULTS_RESO
     echo "GET /api/results configured"
 else
     echo "GET method for /api/results already exists"
+fi
+
+# Create OPTIONS method for /api/results (for CORS preflight)
+if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $RESULTS_RESOURCE_ID --http-method OPTIONS --region $REGION 2>/dev/null; then
+    echo "Creating OPTIONS method for /api/results..."
+    aws apigateway put-method --rest-api-id $API_ID --resource-id $RESULTS_RESOURCE_ID --http-method OPTIONS --authorization-type NONE --region $REGION
+    
+    aws apigateway put-integration --rest-api-id $API_ID --resource-id $RESULTS_RESOURCE_ID --http-method OPTIONS --type AWS_PROXY --integration-http-method POST --uri "arn:aws:apigateway:$REGION:lambda:path/2015-03-31/functions/$RESULTS_FUNCTION_ARN/invocations" --region $REGION
+    
+    # Grant API Gateway permission to invoke Lambda for OPTIONS
+    aws lambda add-permission --function-name results --statement-id apigateway-invoke-results-options-$(date +%s) --action lambda:InvokeFunction --principal apigateway.amazonaws.com --source-arn "arn:aws:execute-api:$REGION:*:$API_ID/*/OPTIONS/api/results" --region $REGION 2>/dev/null || true
+    echo "OPTIONS /api/results configured"
+else
+    echo "OPTIONS method for /api/results already exists"
 fi
 
 # Deploy API
