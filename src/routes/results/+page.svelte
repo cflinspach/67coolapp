@@ -1,10 +1,32 @@
 <script>
 	import { onMount } from 'svelte';
-	import { Chart, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
-	import { Pie, Bar } from 'svelte-chartjs';
+	import { browser } from '$app/environment';
 	import { API_BASE_URL } from '$lib/config.js';
 	
-	Chart.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
+	let Chart, Pie, Bar;
+	let chartLoaded = false;
+	
+	// Load Chart.js only on client side to avoid SSR issues
+	onMount(async () => {
+		if (browser) {
+			try {
+				const chartModule = await import('chart.js');
+				const svelteChartModule = await import('svelte-chartjs');
+				
+				Chart = chartModule.Chart;
+				Pie = svelteChartModule.Pie;
+				Bar = svelteChartModule.Bar;
+				
+				const { CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } = chartModule;
+				Chart.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
+				
+				chartLoaded = true;
+				console.log('Chart.js loaded successfully');
+			} catch (error) {
+				console.error('Error loading Chart.js:', error);
+			}
+		}
+	});
 	
 	let results = { total: 0, counts: {} };
 	let loading = true;
@@ -28,13 +50,28 @@
 	
 	async function fetchResults() {
 		try {
+			console.log('Fetching results from:', `${API_BASE_URL}/api/results`);
 			const response = await fetch(`${API_BASE_URL}/api/results`);
+			console.log('Response status:', response.status);
+			
 			if (response.ok) {
-				results = await response.json();
+				const data = await response.json();
+				console.log('Results received:', data);
+				results = data;
+				loading = false;
+			} else {
+				console.error('Failed to fetch results. Status:', response.status);
+				const errorText = await response.text();
+				console.error('Error response:', errorText);
 				loading = false;
 			}
 		} catch (error) {
 			console.error('Error fetching results:', error);
+			console.error('Error details:', {
+				message: error.message,
+				stack: error.stack,
+				apiUrl: `${API_BASE_URL}/api/results`
+			});
 			loading = false;
 		}
 	}
@@ -79,21 +116,25 @@
 				Total Votes: <strong>{results.total}</strong>
 			</div>
 			
-			<div class="charts-container">
-				<div class="chart-wrapper">
-					<h2>Pie Chart</h2>
-					<div class="chart">
-						<Pie data={chartData} options={chartOptions} />
+			{#if chartLoaded && Pie && Bar}
+				<div class="charts-container">
+					<div class="chart-wrapper">
+						<h2>Pie Chart</h2>
+						<div class="chart">
+							<svelte:component this={Pie} data={chartData} options={chartOptions} />
+						</div>
+					</div>
+					
+					<div class="chart-wrapper">
+						<h2>Bar Chart</h2>
+						<div class="chart">
+							<svelte:component this={Bar} data={chartData} options={chartOptions} />
+						</div>
 					</div>
 				</div>
-				
-				<div class="chart-wrapper">
-					<h2>Bar Chart</h2>
-					<div class="chart">
-						<Bar data={chartData} options={chartOptions} />
-					</div>
-				</div>
-			</div>
+			{:else}
+				<div class="chart-loading">Loading charts...</div>
+			{/if}
 			
 			<div class="breakdown">
 				<h2>Vote Breakdown</h2>
@@ -180,6 +221,13 @@
 	.chart {
 		position: relative;
 		height: 300px;
+	}
+	
+	.chart-loading {
+		text-align: center;
+		padding: 3rem;
+		color: #666;
+		font-size: 1.2rem;
 	}
 	
 	.breakdown {

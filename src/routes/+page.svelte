@@ -20,6 +20,9 @@
 		
 		submitting = true;
 		try {
+			console.log('Submitting vote:', selectedOption);
+			console.log('API URL:', `${API_BASE_URL}/api/vote`);
+			
 			const response = await fetch(`${API_BASE_URL}/api/vote`, {
 				method: 'POST',
 				headers: {
@@ -28,15 +31,29 @@
 				body: JSON.stringify({ option: selectedOption })
 			});
 			
+			console.log('Vote submission response status:', response.status);
+			
 			if (response.ok) {
+				const data = await response.json();
+				console.log('Vote submitted successfully:', data);
 				submitted = true;
 				selectedOption = '';
 				setTimeout(() => {
 					submitted = false;
 				}, 3000);
+			} else {
+				const errorText = await response.text();
+				console.error('Failed to submit vote. Status:', response.status);
+				console.error('Error response:', errorText);
+				alert('Failed to submit vote. Please try again.');
 			}
 		} catch (error) {
 			console.error('Error submitting vote:', error);
+			console.error('Error details:', {
+				message: error.message,
+				stack: error.stack,
+				apiUrl: `${API_BASE_URL}/api/vote`
+			});
 			alert('Failed to submit vote. Please try again.');
 		} finally {
 			submitting = false;
