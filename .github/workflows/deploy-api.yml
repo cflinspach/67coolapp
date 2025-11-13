@@ -1,0 +1,455 @@
+name: Deploy Lambda Functions and API Gateway
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'amplify/backend/function/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  VOTES_BUCKET_NAME: 67coolapp-votes-cflinspach-05168
+  API_NAME: 67coolapp-api
+  STAGE_NAME: prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Create IAM Role for Lambda Functions
+        id: create-role
+        run: |
+          ROLE_NAME="67coolapp-lambda-role"
+          
+          # Check if role exists
+          if aws iam get-role --role-name $ROLE_NAME 2>/dev/null; then
+            echo "Role already exists"
+          else
+            # Create trust policy
+            cat > trust-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "lambda.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+          EOF
+            
+            # Create role
+            aws iam create-role \
+              --role-name $ROLE_NAME \
+              --assume-role-policy-document file://trust-policy.json
+            
+            # Attach basic Lambda execution policy
+            aws iam attach-role-policy \
+              --role-name $ROLE_NAME \
+              --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+            
+            # Create and attach S3 policy
+            cat > s3-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:PutObject"
+                ],
+                "Resource": "arn:aws:s3:::${{ env.VOTES_BUCKET_NAME }}/*"
+              }
+            ]
+          }
+          EOF
+            
+            aws iam put-role-policy \
+              --role-name $ROLE_NAME \
+              --policy-name S3AccessPolicy \
+              --policy-document file://s3-policy.json
+            
+            # Wait for role to be available
+            echo "Waiting for IAM role to be available..."
+            sleep 10
+          fi
+          
+          # Get role ARN
+          ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.Arn' --output text)
+          echo "ROLE_ARN=$ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "Using IAM Role: $ROLE_ARN"
+
+      - name: Deploy Vote Lambda Function
+        run: |
+          cd amplify/backend/function/vote
+          npm install --legacy-peer-deps --production
+          
+          # Create deployment package
+          zip -r function.zip . -x "*.git*" "*.zip" "node_modules/.cache/*"
+          
+          FUNCTION_NAME="vote"
+          ROLE_ARN="${{ steps.create-role.outputs.ROLE_ARN }}"
+          
+          # Check if function exists
+          if aws lambda get-function --function-name $FUNCTION_NAME --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            echo "Updating existing function..."
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://function.zip \
+              --region ${{ env.AWS_REGION }}
+            
+            aws lambda update-function-configuration \
+              --function-name $FUNCTION_NAME \
+              --environment "Variables={VOTES_BUCKET_NAME=${{ env.VOTES_BUCKET_NAME }},AWS_REGION=${{ env.AWS_REGION }}}" \
+              --region ${{ env.AWS_REGION }}
+          else
+            echo "Creating new function..."
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime nodejs18.x \
+              --role $ROLE_ARN \
+              --handler index.handler \
+              --zip-file fileb://function.zip \
+              --timeout 30 \
+              --memory-size 256 \
+              --environment "Variables={VOTES_BUCKET_NAME=${{ env.VOTES_BUCKET_NAME }},AWS_REGION=${{ env.AWS_REGION }}}" \
+              --region ${{ env.AWS_REGION }}
+          fi
+          
+          # Wait for function to be ready
+          aws lambda wait function-updated --function-name $FUNCTION_NAME --region ${{ env.AWS_REGION }}
+
+      - name: Deploy Results Lambda Function
+        run: |
+          cd amplify/backend/function/results
+          npm install --legacy-peer-deps --production
+          
+          # Create deployment package
+          zip -r function.zip . -x "*.git*" "*.zip" "node_modules/.cache/*"
+          
+          FUNCTION_NAME="results"
+          ROLE_ARN="${{ steps.create-role.outputs.ROLE_ARN }}"
+          
+          # Check if function exists
+          if aws lambda get-function --function-name $FUNCTION_NAME --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            echo "Updating existing function..."
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://function.zip \
+              --region ${{ env.AWS_REGION }}
+            
+            aws lambda update-function-configuration \
+              --function-name $FUNCTION_NAME \
+              --environment "Variables={VOTES_BUCKET_NAME=${{ env.VOTES_BUCKET_NAME }},AWS_REGION=${{ env.AWS_REGION }}}" \
+              --region ${{ env.AWS_REGION }}
+          else
+            echo "Creating new function..."
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime nodejs18.x \
+              --role $ROLE_ARN \
+              --handler index.handler \
+              --zip-file fileb://function.zip \
+              --timeout 30 \
+              --memory-size 256 \
+              --environment "Variables={VOTES_BUCKET_NAME=${{ env.VOTES_BUCKET_NAME }},AWS_REGION=${{ env.AWS_REGION }}}" \
+              --region ${{ env.AWS_REGION }}
+          fi
+          
+          # Wait for function to be ready
+          aws lambda wait function-updated --function-name $FUNCTION_NAME --region ${{ env.AWS_REGION }}
+
+      - name: Create or Get API Gateway
+        id: api-gateway
+        run: |
+          API_NAME="${{ env.API_NAME }}"
+          
+          # Check if API exists
+          API_ID=$(aws apigateway get-rest-apis --query "items[?name=='$API_NAME'].id" --output text --region ${{ env.AWS_REGION }})
+          
+          if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
+            echo "Creating new API Gateway..."
+            API_ID=$(aws apigateway create-rest-api \
+              --name $API_NAME \
+              --description "API for 67 Cool App" \
+              --endpoint-configuration types=REGIONAL \
+              --region ${{ env.AWS_REGION }} \
+              --query 'id' \
+              --output text)
+            echo "Created API Gateway with ID: $API_ID"
+          else
+            echo "API Gateway already exists with ID: $API_ID"
+          fi
+          
+          echo "API_ID=$API_ID" >> $GITHUB_OUTPUT
+
+      - name: Get Root Resource ID
+        id: root-resource
+        run: |
+          API_ID="${{ steps.api-gateway.outputs.API_ID }}"
+          ROOT_ID=$(aws apigateway get-resources \
+            --rest-api-id $API_ID \
+            --region ${{ env.AWS_REGION }} \
+            --query 'items[?path==`/`].id' \
+            --output text)
+          echo "ROOT_ID=$ROOT_ID" >> $GITHUB_OUTPUT
+
+      - name: Create API Resources
+        id: api-resources
+        run: |
+          API_ID="${{ steps.api-gateway.outputs.API_ID }}"
+          ROOT_ID="${{ steps.root-resource.outputs.ROOT_ID }}"
+          
+          # Create /api resource
+          API_RESOURCE_ID=$(aws apigateway get-resources \
+            --rest-api-id $API_ID \
+            --region ${{ env.AWS_REGION }} \
+            --query "items[?path=='/api'].id" \
+            --output text)
+          
+          if [ -z "$API_RESOURCE_ID" ] || [ "$API_RESOURCE_ID" == "None" ]; then
+            API_RESOURCE_ID=$(aws apigateway create-resource \
+              --rest-api-id $API_ID \
+              --parent-id $ROOT_ID \
+              --path-part api \
+              --region ${{ env.AWS_REGION }} \
+              --query 'id' \
+              --output text)
+            echo "Created /api resource"
+          fi
+          
+          # Create /api/vote resource
+          VOTE_RESOURCE_ID=$(aws apigateway get-resources \
+            --rest-api-id $API_ID \
+            --region ${{ env.AWS_REGION }} \
+            --query "items[?path=='/api/vote'].id" \
+            --output text)
+          
+          if [ -z "$VOTE_RESOURCE_ID" ] || [ "$VOTE_RESOURCE_ID" == "None" ]; then
+            VOTE_RESOURCE_ID=$(aws apigateway create-resource \
+              --rest-api-id $API_ID \
+              --parent-id $API_RESOURCE_ID \
+              --path-part vote \
+              --region ${{ env.AWS_REGION }} \
+              --query 'id' \
+              --output text)
+            echo "Created /api/vote resource"
+          fi
+          
+          # Create /api/results resource
+          RESULTS_RESOURCE_ID=$(aws apigateway get-resources \
+            --rest-api-id $API_ID \
+            --region ${{ env.AWS_REGION }} \
+            --query "items[?path=='/api/results'].id" \
+            --output text)
+          
+          if [ -z "$RESULTS_RESOURCE_ID" ] || [ "$RESULTS_RESOURCE_ID" == "None" ]; then
+            RESULTS_RESOURCE_ID=$(aws apigateway create-resource \
+              --rest-api-id $API_ID \
+              --parent-id $API_RESOURCE_ID \
+              --path-part results \
+              --region ${{ env.AWS_REGION }} \
+              --query 'id' \
+              --output text)
+            echo "Created /api/results resource"
+          fi
+          
+          echo "API_RESOURCE_ID=$API_RESOURCE_ID" >> $GITHUB_OUTPUT
+          echo "VOTE_RESOURCE_ID=$VOTE_RESOURCE_ID" >> $GITHUB_OUTPUT
+          echo "RESULTS_RESOURCE_ID=$RESULTS_RESOURCE_ID" >> $GITHUB_OUTPUT
+
+      - name: Create API Methods
+        run: |
+          API_ID="${{ steps.api-gateway.outputs.API_ID }}"
+          VOTE_RESOURCE_ID="${{ steps.api-resources.outputs.VOTE_RESOURCE_ID }}"
+          RESULTS_RESOURCE_ID="${{ steps.api-resources.outputs.RESULTS_RESOURCE_ID }}"
+          VOTE_FUNCTION_ARN=$(aws lambda get-function --function-name vote --region ${{ env.AWS_REGION }} --query 'Configuration.FunctionArn' --output text)
+          RESULTS_FUNCTION_ARN=$(aws lambda get-function --function-name results --region ${{ env.AWS_REGION }} --query 'Configuration.FunctionArn' --output text)
+          
+          # Create POST method for /api/vote
+          if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $VOTE_RESOURCE_ID --http-method POST --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            aws apigateway put-method \
+              --rest-api-id $API_ID \
+              --resource-id $VOTE_RESOURCE_ID \
+              --http-method POST \
+              --authorization-type NONE \
+              --region ${{ env.AWS_REGION }}
+            
+            aws apigateway put-integration \
+              --rest-api-id $API_ID \
+              --resource-id $VOTE_RESOURCE_ID \
+              --http-method POST \
+              --type AWS_PROXY \
+              --integration-http-method POST \
+              --uri "arn:aws:apigateway:${{ env.AWS_REGION }}:lambda:path/2015-03-31/functions/$VOTE_FUNCTION_ARN/invocations" \
+              --region ${{ env.AWS_REGION }}
+            
+            # Grant API Gateway permission to invoke Lambda
+            aws lambda add-permission \
+              --function-name vote \
+              --statement-id apigateway-invoke-vote \
+              --action lambda:InvokeFunction \
+              --principal apigateway.amazonaws.com \
+              --source-arn "arn:aws:execute-api:${{ env.AWS_REGION }}:*:$API_ID/*/POST/api/vote" \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          fi
+          
+          # Create GET method for /api/results
+          if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $RESULTS_RESOURCE_ID --http-method GET --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            aws apigateway put-method \
+              --rest-api-id $API_ID \
+              --resource-id $RESULTS_RESOURCE_ID \
+              --http-method GET \
+              --authorization-type NONE \
+              --region ${{ env.AWS_REGION }}
+            
+            aws apigateway put-integration \
+              --rest-api-id $API_ID \
+              --resource-id $RESULTS_RESOURCE_ID \
+              --http-method GET \
+              --type AWS_PROXY \
+              --integration-http-method POST \
+              --uri "arn:aws:apigateway:${{ env.AWS_REGION }}:lambda:path/2015-03-31/functions/$RESULTS_FUNCTION_ARN/invocations" \
+              --region ${{ env.AWS_REGION }}
+            
+            # Grant API Gateway permission to invoke Lambda
+            aws lambda add-permission \
+              --function-name results \
+              --statement-id apigateway-invoke-results \
+              --action lambda:InvokeFunction \
+              --principal apigateway.amazonaws.com \
+              --source-arn "arn:aws:execute-api:${{ env.AWS_REGION }}:*:$API_ID/*/GET/api/results" \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          fi
+          
+          # Enable CORS for both endpoints
+          echo "Enabling CORS..."
+          
+          # CORS for /api/vote
+          aws apigateway put-method-response \
+            --rest-api-id $API_ID \
+            --resource-id $VOTE_RESOURCE_ID \
+            --http-method POST \
+            --status-code 200 \
+            --response-parameters "method.response.header.Access-Control-Allow-Origin=true" \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          
+          aws apigateway put-integration-response \
+            --rest-api-id $API_ID \
+            --resource-id $VOTE_RESOURCE_ID \
+            --http-method POST \
+            --status-code 200 \
+            --response-parameters '{"method.response.header.Access-Control-Allow-Origin":"'"'"'*'"'"'"}' \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          
+          # CORS for /api/results
+          aws apigateway put-method-response \
+            --rest-api-id $API_ID \
+            --resource-id $RESULTS_RESOURCE_ID \
+            --http-method GET \
+            --status-code 200 \
+            --response-parameters "method.response.header.Access-Control-Allow-Origin=true" \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          
+          aws apigateway put-integration-response \
+            --rest-api-id $API_ID \
+            --resource-id $RESULTS_RESOURCE_ID \
+            --http-method GET \
+            --status-code 200 \
+            --response-parameters '{"method.response.header.Access-Control-Allow-Origin":"'"'"'*'"'"'"}' \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          
+          # Add OPTIONS method for CORS preflight
+          for RESOURCE_ID in $VOTE_RESOURCE_ID $RESULTS_RESOURCE_ID; do
+            if ! aws apigateway get-method --rest-api-id $API_ID --resource-id $RESOURCE_ID --http-method OPTIONS --region ${{ env.AWS_REGION }} 2>/dev/null; then
+              aws apigateway put-method \
+                --rest-api-id $API_ID \
+                --resource-id $RESOURCE_ID \
+                --http-method OPTIONS \
+                --authorization-type NONE \
+                --region ${{ env.AWS_REGION }}
+              
+              aws apigateway put-integration \
+                --rest-api-id $API_ID \
+                --resource-id $RESOURCE_ID \
+                --http-method OPTIONS \
+                --type MOCK \
+                --request-templates '{"application/json":"{\"statusCode\":200}"}' \
+                --region ${{ env.AWS_REGION }}
+              
+              aws apigateway put-method-response \
+                --rest-api-id $API_ID \
+                --resource-id $RESOURCE_ID \
+                --http-method OPTIONS \
+                --status-code 200 \
+                --response-parameters '{"method.response.header.Access-Control-Allow-Origin":true,"method.response.header.Access-Control-Allow-Methods":true,"method.response.header.Access-Control-Allow-Headers":true}' \
+                --response-models '{"application/json":"Empty"}' \
+                --region ${{ env.AWS_REGION }}
+              
+              aws apigateway put-integration-response \
+                --rest-api-id $API_ID \
+                --resource-id $RESOURCE_ID \
+                --http-method OPTIONS \
+                --status-code 200 \
+                --response-parameters '{"method.response.header.Access-Control-Allow-Origin":"'"'"'*'"'"'","method.response.header.Access-Control-Allow-Methods":"'"'"'GET,POST,OPTIONS'"'"'","method.response.header.Access-Control-Allow-Headers":"'"'"'Content-Type'"'"'"}' \
+                --response-templates '{"application/json":""}' \
+                --region ${{ env.AWS_REGION }}
+            fi
+          done
+
+      - name: Deploy API Gateway
+        id: deploy-api
+        run: |
+          API_ID="${{ steps.api-gateway.outputs.API_ID }}"
+          STAGE_NAME="${{ env.STAGE_NAME }}"
+          
+          # Deploy API
+          DEPLOYMENT_ID=$(aws apigateway create-deployment \
+            --rest-api-id $API_ID \
+            --stage-name $STAGE_NAME \
+            --region ${{ env.AWS_REGION }} \
+            --query 'id' \
+            --output text)
+          
+          API_URL="https://$API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/$STAGE_NAME"
+          echo "API_URL=$API_URL" >> $GITHUB_OUTPUT
+          echo "API Gateway deployed successfully!"
+          echo "API URL: $API_URL"
+
+      - name: Output API Gateway URL
+        run: |
+          echo "=========================================="
+          echo "🚀 Deployment Complete!"
+          echo "=========================================="
+          echo "API Gateway URL: ${{ steps.deploy-api.outputs.API_URL }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Go to AWS Amplify Console"
+          echo "2. Navigate to your app → Environment variables"
+          echo "3. Add/Update: VITE_API_BASE_URL = ${{ steps.deploy-api.outputs.API_URL }}"
+          echo "4. Redeploy your Amplify app"
+          echo "=========================================="
+
