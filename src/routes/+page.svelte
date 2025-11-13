@@ -20,10 +20,11 @@
 		
 		submitting = true;
 		try {
+			const apiUrl = API_BASE_URL ? `${API_BASE_URL}/api/vote` : '/api/vote';
 			console.log('Submitting vote:', selectedOption);
-			console.log('API URL:', `${API_BASE_URL}/api/vote`);
+			console.log('API URL:', apiUrl);
 			
-			const response = await fetch(`${API_BASE_URL}/api/vote`, {
+			const response = await fetch(apiUrl, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
@@ -49,10 +50,11 @@
 			}
 		} catch (error) {
 			console.error('Error submitting vote:', error);
+			const apiUrl = API_BASE_URL ? `${API_BASE_URL}/api/vote` : '/api/vote';
 			console.error('Error details:', {
 				message: error.message,
 				stack: error.stack,
-				apiUrl: `${API_BASE_URL}/api/vote`
+				apiUrl: apiUrl
 			});
 			alert('Failed to submit vote. Please try again.');
 		} finally {

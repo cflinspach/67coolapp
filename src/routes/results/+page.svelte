@@ -50,8 +50,9 @@
 	
 	async function fetchResults() {
 		try {
-			console.log('Fetching results from:', `${API_BASE_URL}/api/results`);
-			const response = await fetch(`${API_BASE_URL}/api/results`);
+			const apiUrl = API_BASE_URL ? `${API_BASE_URL}/api/results` : '/api/results';
+			console.log('Fetching results from:', apiUrl);
+			const response = await fetch(apiUrl);
 			console.log('Response status:', response.status);
 			
 			if (response.ok) {
@@ -67,10 +68,11 @@
 			}
 		} catch (error) {
 			console.error('Error fetching results:', error);
+			const apiUrl = API_BASE_URL ? `${API_BASE_URL}/api/results` : '/api/results';
 			console.error('Error details:', {
 				message: error.message,
 				stack: error.stack,
-				apiUrl: `${API_BASE_URL}/api/results`
+				apiUrl: apiUrl
 			});
 			loading = false;
 		}
