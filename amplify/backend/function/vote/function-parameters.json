@@ -1,0 +1,35 @@
+{
+  "lambdaLayers": [],
+  "environmentVariableList": [
+    {
+      "cloudFormationParameterName": "votesBucketName",
+      "environmentVariableName": "VOTES_BUCKET_NAME"
+    }
+  ],
+  "permissions": {
+    "api": {
+      "api": [
+        {
+          "apiId": "api",
+          "apiName": "api",
+          "resourceName": "vote",
+          "path": "/api/vote",
+          "httpMethod": "POST"
+        }
+      ]
+    },
+    "storage": {
+      "s3": [
+        {
+          "bucketName": "votesBucketName",
+          "resourceName": "votesBucket",
+          "permissions": [
+            "s3:GetObject",
+            "s3:PutObject"
+          ]
+        }
+      ]
+    }
+  }
+}
+

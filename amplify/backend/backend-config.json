@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "function": {
+    "vote": {
+      "service": "Lambda",
+      "providerPlugin": "awscloudformation",
+      "build": true
+    },
+    "results": {
+      "service": "Lambda",
+      "providerPlugin": "awscloudformation",
+      "build": true
+    }
+  }
+}
+

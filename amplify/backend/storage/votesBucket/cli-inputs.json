@@ -1,0 +1,9 @@
+{
+  "resourceName": "votesBucket",
+  "serviceType": "imported",
+  "serviceName": "S3",
+  "serviceConfiguration": {
+    "bucketName": "votesBucketName"
+  }
+}
+
